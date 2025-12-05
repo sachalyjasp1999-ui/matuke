@@ -1,10 +1,3 @@
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || '',
-  dangerouslyAllowBrowser: true
-})
-
 export interface Recipe {
   title: string
   description?: string
@@ -40,63 +33,23 @@ export interface AnalysisResult {
 
 export async function analyzeImageWithVision(imageBase64: string, userRestrictions?: string[]): Promise<AnalysisResult> {
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Analisa esta imagem e identifica:
-1. Se são ingredientes crus, prato pronto, bolo/sobremesa ou mistura
-2. Lista os itens identificados
-3. Gera uma receita COMPLETA e REALISTA em português de Portugal
-
-Restrições do usuário: ${userRestrictions?.join(', ') || 'Nenhuma'}
-
-Retorna em JSON com esta estrutura:
-{
-  "type": "ingredients|dish|dessert|mixed",
-  "message": "frase introdutória",
-  "items": ["item1", "item2"],
-  "recipe": {
-    "title": "Nome da Receita",
-    "description": "Descrição curta",
-    "prepTime": "30 minutos",
-    "difficulty": "Fácil|Médio|Difícil",
-    "servings": 4,
-    "ingredients": [{"name": "ingrediente", "quantity": "200g", "isRestricted": false}],
-    "steps": ["Passo 1", "Passo 2"],
-    "variations": {
-      "quick": "versão rápida",
-      "economical": "versão económica",
-      "healthy": "versão saudável"
-    },
-    "chefTips": ["dica 1", "dica 2"],
-    "videoSuggestions": ["sugestão de vídeo"]
-  },
-  "warnings": ["aviso sobre ingrediente restrito"],
-  "substitutions": [{"ingredient": "X", "substitute": "Y"}]
-}`
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: imageBase64
-              }
-            }
-          ]
-        }
-      ],
-      max_tokens: 2000
+    const response = await fetch('/api/analyze-image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        imageBase64,
+        userRestrictions
+      })
     })
 
-    const content = response.choices[0].message.content
-    if (!content) throw new Error('Resposta vazia da API')
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || 'Erro ao analisar imagem')
+    }
 
-    const result = JSON.parse(content)
-    return result
+    return await response.json()
   } catch (error) {
     console.error('Erro ao analisar imagem:', error)
     throw error
@@ -105,49 +58,23 @@ Retorna em JSON com esta estrutura:
 
 export async function analyzeTextQuery(query: string, userRestrictions?: string[]): Promise<AnalysisResult> {
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'user',
-          content: `Analisa este pedido: "${query}"
-
-Restrições do usuário: ${userRestrictions?.join(', ') || 'Nenhuma'}
-
-Gera uma receita COMPLETA e REALISTA em português de Portugal.
-
-Retorna em JSON com esta estrutura:
-{
-  "type": "text",
-  "message": "Entendi o teu pedido...",
-  "recipe": {
-    "title": "Nome da Receita",
-    "description": "Descrição curta",
-    "prepTime": "30 minutos",
-    "difficulty": "Fácil|Médio|Difícil",
-    "servings": 4,
-    "ingredients": [{"name": "ingrediente", "quantity": "200g", "isRestricted": false}],
-    "steps": ["Passo 1", "Passo 2"],
-    "variations": {
-      "quick": "versão rápida",
-      "economical": "versão económica",
-      "healthy": "versão saudável"
-    },
-    "chefTips": ["dica 1", "dica 2"]
-  },
-  "warnings": ["aviso sobre ingrediente restrito"],
-  "substitutions": [{"ingredient": "X", "substitute": "Y"}]
-}`
-        }
-      ],
-      max_tokens: 2000
+    const response = await fetch('/api/analyze-text', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query,
+        userRestrictions
+      })
     })
 
-    const content = response.choices[0].message.content
-    if (!content) throw new Error('Resposta vazia da API')
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || 'Erro ao analisar texto')
+    }
 
-    const result = JSON.parse(content)
-    return result
+    return await response.json()
   } catch (error) {
     console.error('Erro ao analisar texto:', error)
     throw error
@@ -158,16 +85,16 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   try {
     const formData = new FormData()
     formData.append('file', audioBlob, 'audio.webm')
-    formData.append('model', 'whisper-1')
-    formData.append('language', 'pt')
 
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    const response = await fetch('/api/transcribe-audio', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`
-      },
       body: formData
     })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || 'Erro ao transcrever áudio')
+    }
 
     const data = await response.json()
     return data.text
