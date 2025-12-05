@@ -1,18 +1,9 @@
-// src/lib/openai.ts
 import OpenAI from 'openai'
 
-/**
- * IMPORTANTE:
- * - Usa process.env.OPENAI_API_KEY (server-side). NÃO uses NEXT_PUBLIC_OPENAI_API_KEY.
- * - Este ficheiro deve ser utilizado apenas no servidor (API routes / server side).
- * - Se importares isto no client, vais expor a chave. Não faças isso.
- */
-
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || ''
+  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY || '',
+  dangerouslyAllowBrowser: true
 })
-
-export default openai
 
 export interface Recipe {
   title: string
@@ -101,7 +92,7 @@ Retorna em JSON com esta estrutura:
       max_tokens: 2000
     })
 
-    const content = response.choices?.[0]?.message?.content
+    const content = response.choices[0].message.content
     if (!content) throw new Error('Resposta vazia da API')
 
     const result = JSON.parse(content)
@@ -152,7 +143,7 @@ Retorna em JSON com esta estrutura:
       max_tokens: 2000
     })
 
-    const content = response.choices?.[0]?.message?.content
+    const content = response.choices[0].message.content
     if (!content) throw new Error('Resposta vazia da API')
 
     const result = JSON.parse(content)
@@ -163,12 +154,6 @@ Retorna em JSON com esta estrutura:
   }
 }
 
-/**
- * Transcrição de áudio:
- * - Este exemplo usa fetch para a API de transcrições da OpenAI com a chave do servidor.
- * - IMPORTANTE: esta função também deve ser chamada a partir do servidor (API route). 
- *   Se fizermos fetch para a OpenAI com a chave aqui no client, a chave fica exposta.
- */
 export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   try {
     const formData = new FormData()
@@ -179,8 +164,7 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
-        // usa a variável do servidor — isto só funciona se executado server-side
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`
       },
       body: formData
     })
