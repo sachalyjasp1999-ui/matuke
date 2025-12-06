@@ -11,43 +11,65 @@ export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    checkUser()
+    setMounted(true)
+    return () => setMounted(false)
   }, [])
 
-  const checkUser = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      
-      if (!user) {
-        router.push('/login')
-        return
+  useEffect(() => {
+    if (!mounted) return
+    
+    let cancelled = false
+    
+    const checkUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        
+        if (cancelled) return
+        
+        if (!user) {
+          router.push('/login')
+          return
+        }
+
+        setUser(user)
+
+        // Verificar se tem perfil
+        const { data: profile } = await supabase
+          .from('user_profile')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+
+        if (cancelled) return
+
+        if (!profile) {
+          router.push('/onboarding')
+          return
+        }
+
+        setProfile(profile)
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Erro ao verificar usuário:', error)
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
-
-      setUser(user)
-
-      // Verificar se tem perfil
-      const { data: profile } = await supabase
-        .from('user_profile')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        router.push('/onboarding')
-        return
-      }
-
-      setProfile(profile)
-    } catch (error) {
-      console.error('Erro ao verificar usuário:', error)
-    } finally {
-      setLoading(false)
     }
-  }
 
-  if (loading) {
+    checkUser()
+
+    return () => {
+      cancelled = true
+    }
+  }, [mounted, router])
+
+  if (!mounted || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-white via-[#FFF9F5] to-[#FFF5ED]">
         <div className="text-center">

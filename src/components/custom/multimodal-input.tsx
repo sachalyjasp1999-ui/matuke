@@ -23,21 +23,56 @@ export function MultimodalInput() {
   const [userRestrictions, setUserRestrictions] = useState<string[]>([])
   const [searchHistory, setSearchHistory] = useState<SearchHistory[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  const [mounted, setMounted] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    loadUserRestrictions()
-    loadSearchHistory()
+    setMounted(true)
+    return () => {
+      setMounted(false)
+      // Cleanup: cancelar requisições pendentes
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      // Parar gravação se estiver ativa
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop()
+      }
+    }
   }, [])
 
-  const loadUserRestrictions = async () => {
+  useEffect(() => {
+    if (!mounted) return
+    
+    let cancelled = false
+
+    const loadData = async () => {
+      try {
+        await loadUserRestrictions(cancelled)
+        loadSearchHistory()
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Erro ao carregar dados:', error)
+        }
+      }
+    }
+
+    loadData()
+
+    return () => {
+      cancelled = true
+    }
+  }, [mounted])
+
+  const loadUserRestrictions = async (cancelled: boolean = false) => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user || cancelled) return
 
       const { data: profile } = await supabase
         .from('user_profile')
@@ -45,7 +80,7 @@ export function MultimodalInput() {
         .eq('id', user.id)
         .single()
 
-      if (profile) {
+      if (profile && !cancelled) {
         const restrictions = [
           ...(profile.dietary_restrictions || []),
           ...(profile.allergies || [])
@@ -53,94 +88,132 @@ export function MultimodalInput() {
         setUserRestrictions(restrictions)
       }
     } catch (error) {
-      console.error('Erro ao carregar restrições:', error)
+      if (!cancelled) {
+        console.error('Erro ao carregar restrições:', error)
+      }
     }
   }
 
   const loadSearchHistory = () => {
-    const stored = localStorage.getItem('matuke_search_history')
-    if (stored) {
-      const history = JSON.parse(stored)
-      setSearchHistory(history.slice(0, 5))
+    try {
+      const stored = localStorage.getItem('matuke_search_history')
+      if (stored) {
+        const history = JSON.parse(stored)
+        setSearchHistory(history.slice(0, 5))
+      }
+    } catch (error) {
+      console.error('Erro ao carregar histórico:', error)
     }
   }
 
   const saveToHistory = (query: string, type: 'text' | 'image' | 'voice') => {
-    const newHistory = [
-      { query, timestamp: new Date(), type },
-      ...searchHistory
-    ].slice(0, 5)
-    
-    setSearchHistory(newHistory)
-    localStorage.setItem('matuke_search_history', JSON.stringify(newHistory))
+    try {
+      const newHistory = [
+        { query, timestamp: new Date(), type },
+        ...searchHistory
+      ].slice(0, 5)
+      
+      setSearchHistory(newHistory)
+      localStorage.setItem('matuke_search_history', JSON.stringify(newHistory))
+    } catch (error) {
+      console.error('Erro ao salvar histórico:', error)
+    }
   }
 
   const analyzeImage = async (imageFile: File) => {
+    if (!mounted) return
+    
     setAnalyzing(true)
     setResult(null)
+
+    // Criar novo AbortController para esta requisição
+    abortControllerRef.current = new AbortController()
 
     try {
       // Criar preview da imagem
       const reader = new FileReader()
       reader.onload = async (e) => {
+        if (!mounted) return
+        
         const base64Image = e.target?.result as string
         setSelectedImage(base64Image)
 
         try {
           const analysisResult = await analyzeImageWithVision(base64Image, userRestrictions)
-          setResult(analysisResult)
-          saveToHistory('Análise de imagem', 'image')
-        } catch (error) {
-          console.error('Erro na análise:', error)
-          alert('Erro ao analisar imagem. Verifica se a chave da OpenAI está configurada.')
+          if (mounted) {
+            setResult(analysisResult)
+            saveToHistory('Análise de imagem', 'image')
+          }
+        } catch (error: any) {
+          if (mounted && error.name !== 'AbortError') {
+            console.error('Erro na análise:', error)
+            alert('Erro ao analisar imagem. Verifica se a chave da OpenAI está configurada.')
+          }
         } finally {
-          setAnalyzing(false)
+          if (mounted) {
+            setAnalyzing(false)
+          }
         }
       }
       reader.readAsDataURL(imageFile)
     } catch (error) {
-      console.error('Erro ao processar imagem:', error)
-      setAnalyzing(false)
+      if (mounted) {
+        console.error('Erro ao processar imagem:', error)
+        setAnalyzing(false)
+      }
     }
   }
 
   const analyzeText = async (text: string) => {
+    if (!mounted) return
+    
     setAnalyzing(true)
     setResult(null)
 
+    // Criar novo AbortController para esta requisição
+    abortControllerRef.current = new AbortController()
+
     try {
       const analysisResult = await analyzeTextQuery(text, userRestrictions)
-      setResult(analysisResult)
-      saveToHistory(text, 'text')
-    } catch (error) {
-      console.error('Erro na análise:', error)
-      alert('Erro ao analisar texto. Verifica se a chave da OpenAI está configurada.')
+      if (mounted) {
+        setResult(analysisResult)
+        saveToHistory(text, 'text')
+      }
+    } catch (error: any) {
+      if (mounted && error.name !== 'AbortError') {
+        console.error('Erro na análise:', error)
+        alert('Erro ao analisar texto. Verifica se a chave da OpenAI está configurada.')
+      }
     } finally {
-      setAnalyzing(false)
+      if (mounted) {
+        setAnalyzing(false)
+      }
     }
   }
 
   const handleTextSubmit = () => {
-    if (textInput.trim()) {
+    if (textInput.trim() && mounted) {
       analyzeText(textInput)
     }
   }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
+    if (file && mounted) {
       analyzeImage(file)
     }
   }
 
   const handleCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
+    if (file && mounted) {
       analyzeImage(file)
     }
   }
 
   const handleVoiceInput = async () => {
+    if (!mounted) return
+    
     if (!isRecording) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -153,19 +226,30 @@ export function MultimodalInput() {
         }
 
         mediaRecorder.onstop = async () => {
+          if (!mounted) {
+            stream.getTracks().forEach(track => track.stop())
+            return
+          }
+          
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
           
           setAnalyzing(true)
           try {
             const transcription = await transcribeAudio(audioBlob)
-            setTextInput(transcription)
-            await analyzeText(transcription)
-            saveToHistory(transcription, 'voice')
-          } catch (error) {
-            console.error('Erro ao transcrever:', error)
-            alert('Erro ao transcrever áudio. Verifica se a chave da OpenAI está configurada.')
+            if (mounted) {
+              setTextInput(transcription)
+              await analyzeText(transcription)
+              saveToHistory(transcription, 'voice')
+            }
+          } catch (error: any) {
+            if (mounted && error.name !== 'AbortError') {
+              console.error('Erro ao transcrever:', error)
+              alert('Erro ao transcrever áudio. Verifica se a chave da OpenAI está configurada.')
+            }
           } finally {
-            setAnalyzing(false)
+            if (mounted) {
+              setAnalyzing(false)
+            }
           }
           
           stream.getTracks().forEach(track => track.stop())
@@ -174,8 +258,10 @@ export function MultimodalInput() {
         mediaRecorder.start()
         setIsRecording(true)
       } catch (error) {
-        console.error('Erro ao acessar microfone:', error)
-        alert('Não foi possível acessar o microfone. Verifica as permissões.')
+        if (mounted) {
+          console.error('Erro ao acessar microfone:', error)
+          alert('Não foi possível acessar o microfone. Verifica as permissões.')
+        }
       }
     } else {
       if (mediaRecorderRef.current) {
@@ -186,17 +272,24 @@ export function MultimodalInput() {
   }
 
   const clearResult = () => {
+    if (!mounted) return
     setResult(null)
     setSelectedImage(null)
     setTextInput('')
   }
 
   const handleHistoryClick = (item: SearchHistory) => {
+    if (!mounted) return
+    
     if (item.type === 'text' || item.type === 'voice') {
       setTextInput(item.query)
       analyzeText(item.query)
     }
     setShowHistory(false)
+  }
+
+  if (!mounted) {
+    return null
   }
 
   return (
